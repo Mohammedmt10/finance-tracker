@@ -54,7 +54,7 @@ router.get("/", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 currentPage: page,
                 totalPages: Math.ceil(totalRecords / limit),
                 hasNextPage: page * limit < totalRecords,
-                hasPrevPage: page > 1,
+                hasPrevPage: page > 1 && totalRecords > 0,
             },
         });
     }

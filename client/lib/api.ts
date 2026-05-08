@@ -2,14 +2,13 @@
  * Axios API Client
  *
  * Centralized HTTP client that:
- * - Points all requests to the Express backend on port 3000
  * - Automatically attaches the JWT token to every request
  * - Redirects to /signin on 401/403 responses
  */
 
 import axios from "axios";
 
-const API_BASE_URL = "http://localhost:3000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -50,7 +49,7 @@ api.interceptors.response.use(
       }
     }
     return Promise.reject(error);
-  }
+  },
 );
 
 export default api;

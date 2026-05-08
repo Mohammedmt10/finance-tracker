@@ -2,7 +2,11 @@ import mongoose, { Types } from "mongoose";
 import dotenv from "dotenv";
 dotenv.config();
 
-mongoose.connect(process.env.DATABASE_URL || "");
+try {
+  mongoose.connect(process.env.DATABASE_URL || "");
+} catch (err) {
+  console.log(err);
+}
 
 const UserSchema = new mongoose.Schema({
   email: { type: String, required: true },

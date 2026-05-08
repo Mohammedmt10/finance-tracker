@@ -8,13 +8,13 @@ try {
   console.log(err);
 }
 
+// 1. Cleaned up UserSchema (Removed OTP fields entirely)
 const UserSchema = new mongoose.Schema({
-  email: { type: String, required: true },
+  email: { type: String, required: true, unique: true }, // Added unique: true here so emails don't duplicate
   password: { type: String, required: true },
-  otp: { type: String, required: false, unique: true },
-  otpExpiry: { type: Date, required: false },
 });
 
+// 2. Cleaned up otpSchema (Removed unnecessary sparse)
 const otpSchema = new mongoose.Schema({
   email: { type: String, required: true },
   otp: { type: String, required: true },
@@ -26,6 +26,7 @@ const otpSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now, expires: 600 }, // Auto-deletes after 10 mins
 });
 
+// 3. TransactionSchema is perfect
 const transactionSchema = new mongoose.Schema({
   amount: { type: Number, required: true },
   type: { type: String, enum: ["Income", "Expense"], required: true },

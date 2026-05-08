@@ -31,27 +31,46 @@ router.post("/signup", async (req, res) => {
     return res.status(411).json({ message: "Invalid input" });
   }
 
-  const data = safeparsed.data;
+  const { email, password, actionToken } = safeparsed.data;
 
   try {
-    const exist = await userModel.findOne({
-      email: data.email,
-    });
+    // 1. VERIFY THE ACTION TOKEN FIRST
+    try {
+      const decoded = jwt.verify(actionToken, process.env.JWT_SECRET || "");
 
-    if (exist) {
-      return res.status(411).json({ message: "email already exists" });
+      if (
+        typeof decoded === "string" ||
+        decoded.email !== email ||
+        decoded.purpose !== "SIGNUP" ||
+        !decoded.isVerified
+      ) {
+        return res
+          .status(403)
+          .json({ message: "Unauthorized: Invalid or expired action token" });
+      }
+    } catch (err) {
+      return res
+        .status(403)
+        .json({ message: "Unauthorized: Token verification failed" });
     }
 
-    const hashedPassword = await bcrypt.hash(data.password, 10);
+    // 2. Proceed with user creation
+    const exist = await userModel.findOne({ email });
+
+    if (exist) {
+      return res.status(411).json({ message: "Email already exists" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await userModel.create({
-      email: data.email,
+      email: email,
       password: hashedPassword,
     });
 
     res.status(200).json({ message: "User created successfully", user });
   } catch (error) {
-    return res.status(411).json({ message: "Something went wrong", error });
+    return res.status(500).json({ message: "Something went wrong", error });
   }
 });
 

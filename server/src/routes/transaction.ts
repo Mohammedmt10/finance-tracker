@@ -1,7 +1,33 @@
 import express, { Request, Response } from "express";
 import { authMiddleware } from "../middleware.js";
-import { transactionModel } from "../db.js";
+import { transactionModel, tagModel } from "../db.js";
+import mongoose, { Types } from "mongoose";
 import z from "zod";
+
+/* ── Category presets ── */
+const INCOME_CATEGORIES = [
+  "Salary",
+  "Freelance",
+  "Investment",
+  "Gift",
+  "Refund",
+  "Other",
+] as const;
+
+const EXPENSE_CATEGORIES = [
+  "Food",
+  "Transport",
+  "Housing",
+  "Utilities",
+  "Entertainment",
+  "Shopping",
+  "Healthcare",
+  "Education",
+  "Travel",
+  "Other",
+] as const;
+
+const ALL_CATEGORIES = [...INCOME_CATEGORIES, ...EXPENSE_CATEGORIES];
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -9,6 +35,8 @@ router.use(authMiddleware);
 interface TransactionQuery {
   userId: string;
   type?: "Income" | "Expense";
+  category?: string;
+  tags?: string;
   date?: {
     $gte?: Date;
     $lte?: Date;
@@ -42,6 +70,14 @@ router.get("/", async (req: Request, res: Response) => {
       }
     }
 
+    if (req.query.category) {
+      queryObj.category = req.query.category as string;
+    }
+
+    if (req.query.tag) {
+      queryObj.tags = req.query.tag as string;
+    }
+
     const sortField = (req.query.sortBy as string) || "date";
     const sortOrder = req.query.sortOrder === "asc" ? 1 : -1;
     const page = parseInt(req.query.page as string) || 1;
@@ -71,23 +107,67 @@ router.get("/", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /transaction/categories
+ * Returns the preset category lists for Income and Expense.
+ */
+router.get("/categories", async (_req: Request, res: Response) => {
+  res.status(200).json({
+    income: INCOME_CATEGORIES,
+    expense: EXPENSE_CATEGORIES,
+  });
+});
+
 router.post("/", async (req: Request, res: Response) => {
   try {
     const body = z.object({
       amount: z.number().min(1),
       type: z.enum(["Income", "Expense"]),
+      category: z
+        .string()
+        .min(1)
+        .refine(
+          (val) =>
+            ALL_CATEGORIES.includes(val as (typeof ALL_CATEGORIES)[number]),
+          { message: "Invalid category" },
+        ),
+      tags: z.array(z.string().min(1).max(30)).max(10).optional().default([]),
       description: z.string().optional(),
     });
 
     const safeParse = body.safeParse(req.body);
     if (!safeParse.success) {
-      return res.status(411).json({ message: "Invalid input" });
+      return res
+        .status(411)
+        .json({ message: "Invalid input", errors: safeParse.error.flatten() });
     }
 
-    const transaction = await transactionModel.create({
-      amount: safeParse.data.amount,
-      type: safeParse.data.type,
-      description: safeParse.data.description,
+    const { amount, type, category, tags, description } = safeParse.data;
+
+    // Auto-create any new tags for this user
+    if (tags.length > 0) {
+      const userObjId = new Types.ObjectId(req.userId);
+      const ops = tags.map((name) => ({
+        updateOne: {
+          filter: { userId: userObjId, name: name.trim().toLowerCase() },
+          update: {
+            $setOnInsert: {
+              userId: userObjId,
+              name: name.trim().toLowerCase(),
+            },
+          },
+          upsert: true,
+        },
+      }));
+      await tagModel.bulkWrite(ops);
+    }
+
+    await transactionModel.create({
+      amount,
+      type,
+      category,
+      tags: tags.map((t) => t.trim().toLowerCase()),
+      description,
       userId: req.userId,
     });
 

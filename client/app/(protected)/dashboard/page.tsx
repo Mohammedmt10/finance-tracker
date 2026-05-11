@@ -3,10 +3,10 @@
  *
  * Features:
  * - Summary cards (total income, total expense, net balance)
- * - Add Transaction form (type, description, amount)
- * - Transactions list with filters (type, date range), sorting, and pagination
+ * - Add Transaction form (type, category, description, amount, tags)
+ * - Transactions list with filters (type, category, tag, date range), sorting, and pagination
  *
- * All data comes from: GET /transaction  &  POST /transaction
+ * All data comes from: GET /transaction, POST /transaction, GET /tag, GET /transaction/categories
  */
 
 "use client";
@@ -22,6 +22,7 @@ import {
   Calendar,
   ChevronDown,
   ChevronUp,
+  Tag,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -31,12 +32,15 @@ import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import Spinner from "@/components/ui/Spinner";
 import Pagination from "@/components/ui/Pagination";
+import TagInput from "@/components/ui/TagInput";
 
 /* ── Types ── */
 interface Transaction {
   _id: string;
   amount: number;
   type: "Income" | "Expense";
+  category: string;
+  tags: string[];
   description?: string;
   date: string;
 }
@@ -47,6 +51,16 @@ interface PaginationMeta {
   totalPages: number;
   hasNextPage: boolean;
   hasPrevPage: boolean;
+}
+
+interface TagOption {
+  _id: string;
+  name: string;
+}
+
+interface Categories {
+  income: string[];
+  expense: string[];
 }
 
 /* ── Constants ── */
@@ -70,6 +84,8 @@ export default function DashboardPage() {
 
   // Filters
   const [filterType, setFilterType] = useState<"" | "Income" | "Expense">("");
+  const [filterCategory, setFilterCategory] = useState("");
+  const [filterTag, setFilterTag] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -83,14 +99,60 @@ export default function DashboardPage() {
 
   // Add transaction form
   const [txType, setTxType] = useState<"Income" | "Expense">("Income");
+  const [txCategory, setTxCategory] = useState("");
   const [txDescription, setTxDescription] = useState("");
   const [txAmount, setTxAmount] = useState("");
+  const [txTags, setTxTags] = useState<string[]>([]);
   const [addLoading, setAddLoading] = useState(false);
+
+  // Categories (fetched from API)
+  const [categories, setCategories] = useState<Categories>({
+    income: [],
+    expense: [],
+  });
+
+  // User's dynamic tags (fetched from API)
+  const [availableTags, setAvailableTags] = useState<TagOption[]>([]);
 
   // Summary (calculated from a full query — separate call)
   const [totalIncome, setTotalIncome] = useState(0);
   const [totalExpense, setTotalExpense] = useState(0);
   const [summaryLoading, setSummaryLoading] = useState(true);
+
+  /* ────────────────────────────────────
+     FETCH CATEGORIES
+     ──────────────────────────────────── */
+  useEffect(() => {
+    async function loadCategories() {
+      try {
+        const res = await api.get("/transaction/categories");
+        setCategories(res.data);
+        // Set default category for the form
+        if (res.data.income.length > 0) {
+          setTxCategory(res.data.income[0]);
+        }
+      } catch {
+        console.error("Failed to load categories");
+      }
+    }
+    loadCategories();
+  }, []);
+
+  /* ────────────────────────────────────
+     FETCH TAGS
+     ──────────────────────────────────── */
+  const fetchTags = useCallback(async () => {
+    try {
+      const res = await api.get("/tag");
+      setAvailableTags(res.data.data);
+    } catch {
+      console.error("Failed to load tags");
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTags();
+  }, [fetchTags]);
 
   /* ────────────────────────────────────
      FETCH TRANSACTIONS
@@ -106,6 +168,8 @@ export default function DashboardPage() {
         sortOrder,
       };
       if (filterType) params.type = filterType;
+      if (filterCategory) params.category = filterCategory;
+      if (filterTag) params.tag = filterTag;
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
 
@@ -118,7 +182,7 @@ export default function DashboardPage() {
     } finally {
       setListLoading(false);
     }
-  }, [page, sortBy, sortOrder, filterType, startDate, endDate]);
+  }, [page, sortBy, sortOrder, filterType, filterCategory, filterTag, startDate, endDate]);
 
   /* ────────────────────────────────────
      FETCH SUMMARY (all transactions)
@@ -163,6 +227,19 @@ export default function DashboardPage() {
   }, [fetchSummary, totalIncome, totalExpense]);
 
   /* ────────────────────────────────────
+     SYNC CATEGORY ON TYPE CHANGE
+     ──────────────────────────────────── */
+  useEffect(() => {
+    const list =
+      txType === "Income" ? categories.income : categories.expense;
+    if (list.length > 0) {
+      setTxCategory(list[0]);
+    } else {
+      setTxCategory("");
+    }
+  }, [txType, categories]);
+
+  /* ────────────────────────────────────
      ADD TRANSACTION
      ──────────────────────────────────── */
   async function handleAddTransaction(e: FormEvent) {
@@ -174,13 +251,20 @@ export default function DashboardPage() {
       return;
     }
 
+    if (!txCategory) {
+      toast.error("Please select a category.");
+      return;
+    }
+
     setAddLoading(true);
 
     try {
       await api.post("/transaction", {
         type: txType,
+        category: txCategory,
         description: txDescription || undefined,
         amount,
+        tags: txTags,
       });
 
       toast.success("Transaction added!");
@@ -188,11 +272,12 @@ export default function DashboardPage() {
       // Reset form
       setTxDescription("");
       setTxAmount("");
+      setTxTags([]);
 
       // Refresh data
       setPage(1);
       fetchSummary();
-      // The page change triggers fetchTransactions via the effect
+      fetchTags(); // Refresh tags in case new ones were auto-created
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data
@@ -204,10 +289,24 @@ export default function DashboardPage() {
   }
 
   /* ────────────────────────────────────
+     CREATE TAG (from TagInput)
+     ──────────────────────────────────── */
+  async function handleCreateTag(name: string) {
+    try {
+      await api.post("/tag", { name });
+      fetchTags();
+    } catch {
+      // Tag might already exist — that's fine, we still add it locally
+    }
+  }
+
+  /* ────────────────────────────────────
      HELPERS
      ──────────────────────────────────── */
   function resetFilters() {
     setFilterType("");
+    setFilterCategory("");
+    setFilterTag("");
     setStartDate("");
     setEndDate("");
     setPage(1);
@@ -239,6 +338,18 @@ export default function DashboardPage() {
   }
 
   const netBalance = totalIncome - totalExpense;
+
+  // Current category list based on selected filter type
+  const filterCategoryList =
+    filterType === "Income"
+      ? categories.income
+      : filterType === "Expense"
+        ? categories.expense
+        : [...new Set([...categories.income, ...categories.expense])];
+
+  // Current category list for the add-transaction form
+  const txCategoryList =
+    txType === "Income" ? categories.income : categories.expense;
 
   /* ────────────────────────────────────
      RENDER
@@ -324,67 +435,106 @@ export default function DashboardPage() {
 
         <form
           onSubmit={handleAddTransaction}
-          className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
+          className="space-y-4"
         >
-          {/* Type toggle */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-slate-300">Type</label>
-            <div className="flex rounded-xl overflow-hidden border border-surface-600">
-              <button
-                type="button"
-                onClick={() => setTxType("Income")}
-                className={`flex-1 py-2.5 text-sm font-semibold transition-colors duration-200 ${
-                  txType === "Income"
-                    ? "bg-green-600 text-white"
-                    : "bg-surface-800 text-slate-400 hover:bg-surface-700"
-                }`}
-              >
-                Income
-              </button>
-              <button
-                type="button"
-                onClick={() => setTxType("Expense")}
-                className={`flex-1 py-2.5 text-sm font-semibold transition-colors duration-200 ${
-                  txType === "Expense"
-                    ? "bg-red-600 text-white"
-                    : "bg-surface-800 text-slate-400 hover:bg-surface-700"
-                }`}
-              >
-                Expense
-              </button>
+          {/* Row 1: Type + Category + Description + Amount */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            {/* Type toggle */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-slate-300">Type</label>
+              <div className="flex rounded-xl overflow-hidden border border-surface-600">
+                <button
+                  type="button"
+                  onClick={() => setTxType("Income")}
+                  className={`flex-1 py-2.5 text-sm font-semibold transition-colors duration-200 ${
+                    txType === "Income"
+                      ? "bg-green-600 text-white"
+                      : "bg-surface-800 text-slate-400 hover:bg-surface-700"
+                  }`}
+                >
+                  Income
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTxType("Expense")}
+                  className={`flex-1 py-2.5 text-sm font-semibold transition-colors duration-200 ${
+                    txType === "Expense"
+                      ? "bg-red-600 text-white"
+                      : "bg-surface-800 text-slate-400 hover:bg-surface-700"
+                  }`}
+                >
+                  Expense
+                </button>
+              </div>
             </div>
+
+            {/* Category dropdown */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-slate-300">
+                Category
+              </label>
+              <select
+                value={txCategory}
+                onChange={(e) => setTxCategory(e.target.value)}
+                className="
+                  rounded-xl bg-surface-800 border border-surface-600
+                  text-slate-100 px-4 py-2.5 text-sm
+                  focus:outline-none focus:ring-2 focus:ring-primary-500/50
+                  transition-all duration-200
+                "
+              >
+                {txCategoryList.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Description */}
+            <Input
+              label="Description"
+              placeholder="e.g. Salary, Groceries…"
+              value={txDescription}
+              onChange={(e) => setTxDescription(e.target.value)}
+            />
+
+            {/* Amount */}
+            <Input
+              label="Amount"
+              type="number"
+              placeholder="0.00"
+              min="1"
+              step="0.01"
+              value={txAmount}
+              onChange={(e) => setTxAmount(e.target.value)}
+              required
+              icon={<DollarSign size={16} />}
+            />
           </div>
 
-          {/* Description */}
-          <Input
-            label="Description"
-            placeholder="e.g. Salary, Groceries…"
-            value={txDescription}
-            onChange={(e) => setTxDescription(e.target.value)}
-          />
+          {/* Row 2: Tags + Submit */}
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-end">
+            {/* Tags */}
+            <TagInput
+              label="Tags"
+              value={txTags}
+              availableTags={availableTags}
+              onChange={setTxTags}
+              onCreateTag={handleCreateTag}
+              max={10}
+            />
 
-          {/* Amount */}
-          <Input
-            label="Amount"
-            type="number"
-            placeholder="0.00"
-            min="1"
-            step="0.01"
-            value={txAmount}
-            onChange={(e) => setTxAmount(e.target.value)}
-            required
-            icon={<DollarSign size={16} />}
-          />
-
-          {/* Submit */}
-          <Button
-            type="submit"
-            isLoading={addLoading}
-            className="w-full md:w-auto"
-          >
-            <Plus size={18} />
-            Add
-          </Button>
+            {/* Submit */}
+            <Button
+              type="submit"
+              isLoading={addLoading}
+              className="w-full md:w-auto"
+            >
+              <Plus size={18} />
+              Add
+            </Button>
+          </div>
         </form>
       </Card>
 
@@ -413,7 +563,7 @@ export default function DashboardPage() {
 
         {/* ── Filters panel ── */}
         {showFilters && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 p-4 rounded-xl bg-surface-800/60 animate-scale-in">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6 p-4 rounded-xl bg-surface-800/60 animate-scale-in">
             {/* Type filter */}
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium text-slate-300">Type</label>
@@ -421,6 +571,7 @@ export default function DashboardPage() {
                 value={filterType}
                 onChange={(e) => {
                   setFilterType(e.target.value as "" | "Income" | "Expense");
+                  setFilterCategory(""); // reset category when type changes
                   setPage(1);
                 }}
                 className="
@@ -433,6 +584,58 @@ export default function DashboardPage() {
                 <option value="">All</option>
                 <option value="Income">Income</option>
                 <option value="Expense">Expense</option>
+              </select>
+            </div>
+
+            {/* Category filter */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-slate-300">
+                Category
+              </label>
+              <select
+                value={filterCategory}
+                onChange={(e) => {
+                  setFilterCategory(e.target.value);
+                  setPage(1);
+                }}
+                className="
+                  rounded-xl bg-surface-800 border border-surface-600
+                  text-slate-100 px-4 py-2.5 text-sm
+                  focus:outline-none focus:ring-2 focus:ring-primary-500/50
+                  transition-all duration-200
+                "
+              >
+                <option value="">All</option>
+                {filterCategoryList.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Tag filter */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-slate-300">Tag</label>
+              <select
+                value={filterTag}
+                onChange={(e) => {
+                  setFilterTag(e.target.value);
+                  setPage(1);
+                }}
+                className="
+                  rounded-xl bg-surface-800 border border-surface-600
+                  text-slate-100 px-4 py-2.5 text-sm
+                  focus:outline-none focus:ring-2 focus:ring-primary-500/50
+                  transition-all duration-200
+                "
+              >
+                <option value="">All</option>
+                {availableTags.map((tag) => (
+                  <option key={tag._id} value={tag.name}>
+                    {tag.name}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -491,7 +694,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Reset filters */}
-            <div className="sm:col-span-3 flex justify-end">
+            <div className="sm:col-span-2 lg:col-span-5 flex justify-end">
               <Button variant="ghost" size="sm" onClick={resetFilters}>
                 Reset Filters
               </Button>
@@ -500,13 +703,23 @@ export default function DashboardPage() {
         )}
 
         {/* ── Sort header row ── */}
-        <div className="hidden sm:grid grid-cols-4 gap-4 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 px-4">
+        <div className="hidden sm:grid grid-cols-5 gap-4 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 px-4">
           <button
             onClick={() => toggleSort("type")}
             className="flex items-center gap-1 hover:text-slate-300 transition-colors text-left"
           >
             Type
             {sortBy === "type" && (
+              <ArrowUpDown size={12} className="text-primary-400" />
+            )}
+          </button>
+
+          <button
+            onClick={() => toggleSort("category")}
+            className="flex items-center gap-1 hover:text-slate-300 transition-colors text-left"
+          >
+            Category
+            {sortBy === "category" && (
               <ArrowUpDown size={12} className="text-primary-400" />
             )}
           </button>
@@ -554,7 +767,7 @@ export default function DashboardPage() {
               <div
                 key={tx._id}
                 className="
-                  grid grid-cols-1 sm:grid-cols-4 gap-2 sm:gap-4
+                  grid grid-cols-1 sm:grid-cols-5 gap-2 sm:gap-4
                   items-center px-4 py-3 rounded-xl
                   bg-surface-800/40 hover:bg-surface-800/70
                   transition-colors duration-200
@@ -581,10 +794,42 @@ export default function DashboardPage() {
                   </span>
                 </div>
 
-                {/* Description */}
-                <p className="text-sm text-slate-300 truncate">
-                  {tx.description || "—"}
-                </p>
+                {/* Category */}
+                <div>
+                  <span
+                    className="
+                      inline-flex items-center gap-1 px-2.5 py-1
+                      rounded-lg text-xs font-medium
+                      bg-surface-700/60 text-slate-300
+                    "
+                  >
+                    {tx.category}
+                  </span>
+                </div>
+
+                {/* Description + Tags */}
+                <div className="space-y-1">
+                  <p className="text-sm text-slate-300 truncate">
+                    {tx.description || "—"}
+                  </p>
+                  {tx.tags && tx.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {tx.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="
+                            inline-flex items-center gap-0.5 px-1.5 py-0.5
+                            rounded text-[10px] font-medium
+                            bg-primary-600/15 text-primary-300
+                          "
+                        >
+                          <Tag size={8} />
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
                 {/* Amount */}
                 <p

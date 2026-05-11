@@ -26,14 +26,24 @@ const otpSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now, expires: 600 }, // Auto-deletes after 10 mins
 });
 
-// 3. TransactionSchema is perfect
+// 3. TransactionSchema
 const transactionSchema = new mongoose.Schema({
   amount: { type: Number, required: true },
   type: { type: String, enum: ["Income", "Expense"], required: true },
+  category: { type: String, required: true },
+  tags: { type: [String], default: [] },
   description: { type: String, required: false },
   date: { type: Date, default: Date.now },
   userId: { type: Types.ObjectId, ref: "User", required: true },
 });
+
+// 4. TagSchema — user-created dynamic tags
+const tagSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  userId: { type: Types.ObjectId, ref: "User", required: true },
+  createdAt: { type: Date, default: Date.now },
+});
+tagSchema.index({ userId: 1, name: 1 }, { unique: true });
 
 export const OtpModel = mongoose.model("OTP", otpSchema);
 export const userModel = mongoose.model("User", UserSchema);
@@ -41,3 +51,4 @@ export const transactionModel = mongoose.model(
   "Transaction",
   transactionSchema,
 );
+export const tagModel = mongoose.model("Tag", tagSchema);

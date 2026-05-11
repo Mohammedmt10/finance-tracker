@@ -30,10 +30,7 @@ export default function Input({
     <div className="flex flex-col gap-1.5 w-full">
       {/* Label */}
       {label && (
-        <label
-          htmlFor={inputId}
-          className="text-sm font-medium text-slate-300"
-        >
+        <label htmlFor={inputId} className="text-sm font-medium text-slate-300">
           {label}
         </label>
       )}
@@ -53,10 +50,10 @@ export default function Input({
             bg-surface-800 border border-surface-600
             text-slate-100 placeholder:text-slate-500
             px-4 py-2.5 text-sm
-            focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500
+            focus:outline-none focus:border-primary-500
             transition-all duration-200
             ${icon ? "pl-10" : ""}
-            ${error ? "border-red-500 focus:ring-red-500/50" : ""}
+            ${error ? "border-red-500" : ""}
             ${className}
           `}
           {...rest}
@@ -64,9 +61,7 @@ export default function Input({
       </div>
 
       {/* Error message */}
-      {error && (
-        <p className="text-xs text-red-400 mt-0.5">{error}</p>
-      )}
+      {error && <p className="text-xs text-red-400 mt-0.5">{error}</p>}
     </div>
   );
 }
